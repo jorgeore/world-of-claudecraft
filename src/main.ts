@@ -8003,9 +8003,13 @@ function wireStartScreens(): void {
     });
   }
   if (discordOrDivider && NATIVE_APP && isNativeIos()) discordOrDivider.hidden = false;
-  // "Continue with Twitch" beside the Discord button (fork addition, web login only).
+  // "Continue with Twitch" beside the Discord button (fork addition, web login).
+  // Shown like the Discord button (no DESKTOP_APP gate: that flag is true in ANY
+  // Electron-UA browser, not just the game's own shell — hiding on it would blank
+  // the button in generic embedded browsers). The full-page redirect works
+  // everywhere the web client does.
   const twitchLoginBtn = document.getElementById('btn-login-twitch');
-  if (twitchLoginBtn && TWITCH_BUILD_ENABLED && !NATIVE_APP && !DESKTOP_APP) {
+  if (twitchLoginBtn && TWITCH_BUILD_ENABLED && !NATIVE_APP) {
     twitchLoginBtn.hidden = false;
     if (discordOrDivider) discordOrDivider.hidden = false;
     twitchLoginBtn.addEventListener('click', (e) => {

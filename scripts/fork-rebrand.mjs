@@ -95,7 +95,32 @@ function walk(dir) {
 }
 
 for (const root of targets) walk(root);
-console.log(`[fork-rebrand] "${NAME}" applied: ${totalHits} replacements in ${filesTouched} files (roots: ${targets.join(', ')})`);
+
+// Filenames that carry the CAPITALIZED brand (e.g. the whitepaper PDF) also get
+// renamed, since the content replace above rewrote every reference to them.
+// Lowercase asset names (worldofclaudecraft-logo.png, woc_*.webp) stay put — the
+// RULES never touch lowercase tokens, so their references were preserved too.
+let renamed = 0;
+for (const root of targets) {
+  let entries;
+  try {
+    entries = fs.readdirSync(root, { withFileTypes: true });
+  } catch {
+    continue;
+  }
+  for (const e of entries) {
+    if (!e.isFile()) continue;
+    let name = e.name;
+    for (const [from, to] of RULES) name = name.split(from).join(to);
+    // URLs are not valid in filenames; only the plain-word rules can apply.
+    if (name !== e.name && !/[/:]/.test(name)) {
+      fs.renameSync(path.join(root, e.name), path.join(root, name));
+      renamed++;
+    }
+  }
+}
+
+console.log(`[fork-rebrand] "${NAME}" applied: ${totalHits} replacements in ${filesTouched} files, ${renamed} files renamed (roots: ${targets.join(', ')})`);
 if (filesTouched === 0) {
   console.warn('[fork-rebrand] WARNING: no files changed — did the build run first?');
 }
