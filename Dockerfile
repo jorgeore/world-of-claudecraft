@@ -24,7 +24,7 @@ ARG VITE_TURNSTILE_SITEKEY=""
 ARG VITE_WALLET_DISABLED=""
 RUN VITE_TURNSTILE_SITEKEY="$VITE_TURNSTILE_SITEKEY" \
     VITE_WALLET_DISABLED="$VITE_WALLET_DISABLED" \
-    npm run build && cp -a dist/media ./media-build && rm -rf dist/media && npm run build:server && npm run build:bot
+    npm run build && cp -a dist/media ./media-build && rm -rf dist/media && npm run build:server && npm run build:bot && node scripts/fork-rebrand.mjs
 
 FROM node:22-alpine
 WORKDIR /app
