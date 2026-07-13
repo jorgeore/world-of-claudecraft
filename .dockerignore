@@ -22,6 +22,7 @@ scripts/*
 !scripts/prod_cpu_game_helper.mjs
 !scripts/prod_cpu_profile_client.mjs
 !scripts/i18n_*.mjs
+!scripts/fork-rebrand.mjs
 !scripts/sfx/
 !scripts/sfx/**
 !scripts/wiki/
