@@ -5881,6 +5881,31 @@ const DONATE_URL = 'https://ko-fi.com/worldofclaudecraft';
 const DISCORD_ONBOARD_KEY = 'woc_discord_onboard';
 let discordPopup: Window | null = null;
 
+// ── Twitch login (fork addition; mirrors the Discord login path, web-only) ────
+// Shown by default like Discord; opt out at build time with VITE_TWITCH_DISABLED=1.
+const TWITCH_BUILD_ENABLED = String(import.meta.env.VITE_TWITCH_DISABLED ?? '').trim() !== '1';
+
+function startTwitchOAuth(): void {
+  // Reuse the Discord onboard flag: it just means "this reload came from an
+  // external-provider login, drop straight into online play".
+  try {
+    localStorage.setItem(DISCORD_ONBOARD_KEY, '1');
+  } catch {
+    /* storage disabled */
+  }
+  // LOGIN from the auth screen: a FULL-PAGE redirect (same COOP rationale as
+  // Discord — a popup's opener is severed by the cross-origin hop).
+  void api
+    .twitchStart('login')
+    .then(({ url }) => {
+      window.location.href = url;
+    })
+    .catch((err) => {
+      console.error('[twitch] could not start oauth', err);
+      flashDiscordError();
+    });
+}
+
 function flashDiscordError(): void {
   const el = document.getElementById('login-error');
   if (el) el.textContent = t('hudChrome.discord.link.error');
@@ -6510,9 +6535,12 @@ async function maybePromptRecoveryEmail(): Promise<void> {
 // chooser. Stale/expired/garbled entries are cleared so they never trap a visitor.
 const DISCORD_CHOICE_KEY = 'woc_discord_choice';
 const DISCORD_CHOICE_TTL_MS = 15 * 60 * 1000;
+// The Twitch bounce page parks its first-time-login choice under its own key
+// (fork addition); same shape + TTL as the Discord one.
+const TWITCH_CHOICE_KEY = 'woc_twitch_choice';
 
 interface ExternalAuthLoginChoice {
-  provider: 'apple' | 'discord';
+  provider: 'apple' | 'discord' | 'twitch';
   linkToken: string;
   username: string;
 }
@@ -6545,6 +6573,39 @@ function readDiscordChoice(): ExternalAuthLoginChoice | null {
 function clearDiscordChoice(): void {
   try {
     localStorage.removeItem(DISCORD_CHOICE_KEY);
+  } catch {
+    /* storage disabled */
+  }
+}
+
+function readTwitchChoice(): ExternalAuthLoginChoice | null {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(TWITCH_CHOICE_KEY);
+  } catch {
+    return null;
+  }
+  if (!raw) return null;
+  try {
+    const d = JSON.parse(raw) as { linkToken?: unknown; username?: unknown; ts?: unknown };
+    const fresh = typeof d.ts === 'number' && Date.now() - d.ts < DISCORD_CHOICE_TTL_MS;
+    if (typeof d.linkToken === 'string' && d.linkToken && fresh) {
+      return {
+        provider: 'twitch',
+        linkToken: d.linkToken,
+        username: typeof d.username === 'string' ? d.username : '',
+      };
+    }
+  } catch {
+    /* fall through to clear a garbled entry */
+  }
+  clearTwitchChoice();
+  return null;
+}
+
+function clearTwitchChoice(): void {
+  try {
+    localStorage.removeItem(TWITCH_CHOICE_KEY);
   } catch {
     /* storage disabled */
   }
@@ -7942,6 +8003,16 @@ function wireStartScreens(): void {
     });
   }
   if (discordOrDivider && NATIVE_APP && isNativeIos()) discordOrDivider.hidden = false;
+  // "Continue with Twitch" beside the Discord button (fork addition, web login only).
+  const twitchLoginBtn = document.getElementById('btn-login-twitch');
+  if (twitchLoginBtn && TWITCH_BUILD_ENABLED && !NATIVE_APP && !DESKTOP_APP) {
+    twitchLoginBtn.hidden = false;
+    if (discordOrDivider) discordOrDivider.hidden = false;
+    twitchLoginBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      startTwitchOAuth();
+    });
+  }
   wireDiscordCtaBanner();
   wireDiscordKeepModal();
   wireRecoveryEmailModal();
@@ -7963,6 +8034,7 @@ function wireStartScreens(): void {
   // A chooser path that minted a session: persist it and drop straight into play.
   const finishDiscordChoice = () => {
     clearDiscordChoice();
+    clearTwitchChoice();
     pendingDiscordChoice = null;
     discordChoiceError('');
     api.saveSession();
@@ -7980,11 +8052,14 @@ function wireStartScreens(): void {
     if ((err as { status?: number })?.status === 400) {
       const provider = pendingDiscordChoice?.provider;
       clearDiscordChoice();
+      clearTwitchChoice();
       pendingDiscordChoice = null;
       discordChoiceError(
         provider === 'apple'
           ? t('hudChrome.auth.appleChoiceExpired')
-          : t('hudChrome.discord.choice.expired'),
+          : provider === 'twitch'
+            ? 'Twitch sign-in expired. Please sign in with Twitch again.'
+            : t('hudChrome.discord.choice.expired'),
       );
       return;
     }
@@ -8005,7 +8080,20 @@ function wireStartScreens(): void {
     pendingDiscordChoice = choice;
     const title = document.querySelector<HTMLElement>('#discord-choice-panel .auth-title');
     const greet = document.getElementById('discord-choice-greeting');
-    if (choice.provider === 'apple') {
+    if (choice.provider === 'twitch') {
+      // Fork addition: literal copy (no i18n keys yet) so missing-locale entries
+      // never render an empty title on the chooser.
+      if (title) {
+        delete title.dataset.i18n;
+        title.textContent = 'Continue with Twitch';
+      }
+      if (greet) {
+        delete greet.dataset.i18n;
+        greet.textContent = choice.username
+          ? `Welcome, ${choice.username}! Create a new account or link an existing one.`
+          : 'Create a new account or link an existing one.';
+      }
+    } else if (choice.provider === 'apple') {
       if (title) {
         title.dataset.i18n = 'hudChrome.auth.appleLoginCta';
         title.textContent = t('hudChrome.auth.appleLoginCta');
@@ -8048,7 +8136,9 @@ function wireStartScreens(): void {
       const request =
         pendingDiscordChoice.provider === 'apple'
           ? api.appleLoginNew(pendingDiscordChoice.linkToken)
-          : api.discordLoginNew(pendingDiscordChoice.linkToken);
+          : pendingDiscordChoice.provider === 'twitch'
+            ? api.twitchLoginNew(pendingDiscordChoice.linkToken)
+            : api.discordLoginNew(pendingDiscordChoice.linkToken);
       void request
         .then(finishDiscordChoice)
         .catch(onDiscordChoiceError)
@@ -8085,13 +8175,21 @@ function wireStartScreens(): void {
               factor.code,
               factor.recoveryCode,
             )
-          : api.discordLoginLink(
-              pendingDiscordChoice.linkToken,
-              username,
-              password,
-              factor.code,
-              factor.recoveryCode,
-            );
+          : pendingDiscordChoice.provider === 'twitch'
+            ? api.twitchLoginLink(
+                pendingDiscordChoice.linkToken,
+                username,
+                password,
+                factor.code,
+                factor.recoveryCode,
+              )
+            : api.discordLoginLink(
+                pendingDiscordChoice.linkToken,
+                username,
+                password,
+                factor.code,
+                factor.recoveryCode,
+              );
       void request
         .then((res) => {
           if (res.twoFactorRequired) {
@@ -8145,6 +8243,11 @@ function wireStartScreens(): void {
     DISCORD_BUILD_ENABLED && document.getElementById('discord-choice-panel')
       ? readDiscordChoice()
       : null;
+  // A parked first-time TWITCH login uses the same chooser panel (fork addition).
+  const parkedTwitchChoice =
+    !parkedDiscordChoice && TWITCH_BUILD_ENABLED && document.getElementById('discord-choice-panel')
+      ? readTwitchChoice()
+      : null;
   // Restore a persisted session: show the Account tab immediately, then confirm
   // the stored token is still valid against the server (clearing it if not).
   if (RESET_TOKEN && document.getElementById('reset-panel')) {
@@ -8152,9 +8255,9 @@ function wireStartScreens(): void {
     // form instead of the normal session restore (index.html only).
     enterLoggedOutChrome();
     show('#reset-panel');
-  } else if (parkedDiscordChoice) {
+  } else if (parkedDiscordChoice || parkedTwitchChoice) {
     enterLoggedOutChrome();
-    showDiscordChoice(parkedDiscordChoice);
+    showDiscordChoice((parkedDiscordChoice ?? parkedTwitchChoice) as ExternalAuthLoginChoice);
   } else if (api.restoreSession()) {
     enterLoggedInChrome();
     void revalidateAccountSession();

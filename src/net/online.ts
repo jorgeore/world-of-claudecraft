@@ -773,6 +773,53 @@ export class Api {
     await this.delete('/api/discord', password ? { password } : {});
   }
 
+  // ── Twitch link/login + status (fork addition; mirrors the Discord family) ──
+  // Returns the id.twitch.tv authorize URL the browser navigates to.
+  async twitchStart(mode: 'login' | 'link'): Promise<{ url: string }> {
+    return this.post(`/api/auth/twitch/start?mode=${mode}`, {});
+  }
+
+  // First-time Twitch login chooser: create a brand-new account for the verified
+  // Twitch identity (parked under `linkToken`) and start a session.
+  async twitchLoginNew(linkToken: string): Promise<void> {
+    const data = await this.post('/api/auth/twitch/login/new', { linkToken });
+    this.token = data.token;
+    this.username = data.username;
+  }
+
+  // First-time Twitch login chooser: link the verified Twitch identity to an
+  // EXISTING account (username + password, plus a 2FA code if that account has it).
+  async twitchLoginLink(
+    linkToken: string,
+    username: string,
+    password: string,
+    code = '',
+    recoveryCode = '',
+  ): Promise<{ twoFactorRequired?: boolean }> {
+    const data = await this.post('/api/auth/twitch/login/link', {
+      linkToken,
+      username,
+      password,
+      code,
+      recoveryCode,
+    });
+    if (data.twoFactorRequired && !data.token) return { twoFactorRequired: true };
+    this.token = data.token;
+    this.username = data.username;
+    return {};
+  }
+
+  // Current account's Twitch link status.
+  async twitchStatus(): Promise<Record<string, unknown>> {
+    return this.get('/api/twitch');
+  }
+
+  // Unlink Twitch. A Twitch-provisioned account must send a `password` so it
+  // stays reachable after unlinking (mirrors unlinkDiscord).
+  async unlinkTwitch(password?: string): Promise<void> {
+    await this.delete('/api/twitch', password ? { password } : {});
+  }
+
   // ── GitHub link + developer-badge status ───────────────────────────────────
   // Returns the github.com authorize URL the browser navigates to (link-only:
   // attaches the verified GitHub identity to the current account).

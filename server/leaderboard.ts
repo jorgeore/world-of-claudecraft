@@ -66,6 +66,7 @@ import { REALM, REALM_DIRECTORY } from './realm';
 // routes.ts and its load-time middleware construction into this module's
 // graph, which partial db mocks in tests cannot serve.
 import { steamEnabled } from './steam/config';
+import { twitchEnabled } from './twitch';
 
 // ---------------------------------------------------------------------------
 // Named constants (single source of truth for the query decoders + fixed args).
@@ -560,6 +561,7 @@ async function statusHandler(ctx: Ctx): Promise<void> {
     realm: REALM,
     players_online: rt.playersOnline(),
     steam: { enabled: steamEnabled() },
+    twitch: { enabled: twitchEnabled() },
   });
 }
 

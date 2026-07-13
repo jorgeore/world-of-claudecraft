@@ -520,6 +520,32 @@ export function resetGithubRateLimits(): void {
   githubAccountAttempts.clear();
 }
 
+// Twitch login/link/status endpoints share one dedicated bucket (per IP AND per
+// account), separate from login/register so an OAuth flood can't lock a user out
+// of logging in. accountId 0 keys the unauthenticated start/callback legs on IP.
+export const TWITCH_MAX_PER_MINUTE = 15;
+const twitchIpAttempts = new Map<string, number[]>();
+const twitchAccountAttempts = new Map<number, number[]>();
+
+export function twitchRateLimited(req: http.IncomingMessage, accountId: number): RateLimitOutcome {
+  const ip = recordSlidingWindowAttempt(twitchIpAttempts, requestIp(req), TWITCH_MAX_PER_MINUTE);
+  // accountId 0 (unauthenticated start/callback) records IP only, so the IP
+  // outcome IS the result; a positive account fuses its own bucket in.
+  if (accountId <= 0) return ip;
+  const account = recordSlidingWindowAttempt(
+    twitchAccountAttempts,
+    accountId,
+    TWITCH_MAX_PER_MINUTE,
+  );
+  return mergeFusedOutcomes(ip, account);
+}
+
+/** Reset Twitch throttles. Test-only: keeps scoped buckets isolated. */
+export function resetTwitchRateLimits(): void {
+  twitchIpAttempts.clear();
+  twitchAccountAttempts.clear();
+}
+
 export const WOC_BALANCE_MAX_PER_MINUTE = 20;
 const wocBalanceIpAttempts = new Map<string, number[]>();
 

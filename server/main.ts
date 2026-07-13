@@ -153,6 +153,8 @@ import {
   handleNativeDiscordExchange,
 } from './discord';
 import { pruneDiscordOAuthStates, pruneDiscordPendingLogins } from './discord_db';
+import { configureTwitchRuntime } from './twitch';
+import { pruneTwitchOAuthStates, pruneTwitchPendingLogins } from './twitch_db';
 import { emailAccountCreated } from './email';
 import { GameServer } from './game';
 import {
@@ -2281,6 +2283,12 @@ configureDiscordRuntime({
   grantCosmetic: (accountId, chromaId) => liveGame().grantMechChromaToAccount(accountId, chromaId),
 });
 
+// Same deferred liveGame() closure for the Twitch routes (fork addition): the
+// IP-block check applies on start/callback/login exactly like the Discord port.
+configureTwitchRuntime({
+  isIpBlocked: (ip) => liveGame().isIpBlocked(ip),
+});
+
 // Claudium routes mirror weapon-skin purchases into account cosmetics live (the
 // same deferred liveGame() closure pattern as the Discord hooks above).
 configureClaudiumRuntime({
@@ -2620,6 +2628,12 @@ export async function startServer(): Promise<http.Server> {
     );
     void pruneGitHubOAuthStates(pool).catch((err) =>
       console.error('github oauth state prune failed:', err),
+    );
+    void pruneTwitchOAuthStates(pool).catch((err) =>
+      console.error('twitch oauth state prune failed:', err),
+    );
+    void pruneTwitchPendingLogins(pool).catch((err) =>
+      console.error('twitch pending login prune failed:', err),
     );
   }, DAILY_PRUNE_INTERVAL_MS).unref();
   setInterval(() => {

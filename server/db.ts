@@ -16,6 +16,7 @@ import type { ChatLogRow } from './chat_log';
 import type { RankedDeedsAccount } from './deeds_board';
 import { DISCORD_SCHEMA } from './discord_db';
 import { GITHUB_SCHEMA } from './github_db';
+import { TWITCH_SCHEMA } from './twitch_db';
 import { isUniqueViolation } from './http_util';
 import { MAPS_SCHEMA } from './maps_db';
 import {
@@ -826,6 +827,9 @@ export async function ensureSchema(): Promise<void> {
     // FK-references accounts(id), so it runs after SCHEMA. Applied unconditionally
     // (idempotent), like the Discord tables.
     await client.query(GITHUB_SCHEMA);
+    // Twitch identity tables (links, oauth states, pending logins) for the
+    // fork's Twitch login. FK-references accounts(id); idempotent like the rest.
+    await client.query(TWITCH_SCHEMA);
     // Tier-2 global rate-limit backstop table (pg-backed fixed-window counters,
     // one row per (policy, key)) for the multi-realm deployment. Applied
     // unconditionally (idempotent), like the Discord/GitHub tables. See
