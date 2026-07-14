@@ -15,13 +15,13 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const NAME = process.env.FORK_GAME_NAME || 'World of Jorgelives';
-const SHORT = process.env.FORK_GAME_SHORT || 'Jorgelives';
+const NAME = process.env.FORK_GAME_NAME || 'World of Livezul';
+const SHORT = process.env.FORK_GAME_SHORT || 'Livezul';
 const DOMAIN = process.env.FORK_DOMAIN || 'mmo.jorgelives.com';
 const COMMUNITY = process.env.FORK_COMMUNITY_URL || 'https://www.twitch.tv/jorge';
 const DONATE = process.env.FORK_DONATE_URL || 'https://jorgelives.com';
 const GITHUB = process.env.FORK_GITHUB || 'github.com/jorgeore/world-of-claudecraft';
-const REALM_WORD = process.env.FORK_REALM_WORD || 'Jorgelives';
+const REALM_WORD = process.env.FORK_REALM_WORD || 'Livezul';
 
 // [from, to] — applied in order, plain string replace (all occurrences).
 const RULES = [
