@@ -55,6 +55,16 @@ const RULES = [
   ['Claudecraft', SHORT],
 ];
 
+// UI elements the fork hides outright (jorge 2026-07-14: no Donate, no GitHub
+// link in the chrome — donations for the live run through their own flow). The
+// data-i18n-aria attribute values are i18n KEYS, so they are locale-independent
+// and stable across upstream UI copy changes. Covers header CTA, home community
+// row, footer socials, and the mobile tray in one stroke.
+const HIDE_SELECTORS =
+  process.env.FORK_HIDE_SELECTORS ||
+  '[data-i18n-aria="a11y.githubProject"],[data-i18n-aria="a11y.donateProject"]';
+const HIDE_STYLE = `<style data-fork-hide>${HIDE_SELECTORS}{display:none!important}</style>`;
+
 const TEXT_EXT = new Set([
   '.html', '.js', '.cjs', '.mjs', '.css', '.json', '.webmanifest',
   '.txt', '.xml', '.svg', '.map',
@@ -114,6 +124,21 @@ for (const p of allTextFiles) {
     totalHits += hits;
     changedFiles.add(p);
   }
+}
+
+// ── Pass 1b: inject the hide-list stylesheet into every built HTML page ───────
+let stylesInjected = 0;
+for (const p of allTextFiles) {
+  if (!p.endsWith('.html')) continue;
+  let s;
+  try {
+    s = fs.readFileSync(p, 'utf8');
+  } catch {
+    continue;
+  }
+  if (s.includes('data-fork-hide') || !s.includes('</head>')) continue;
+  fs.writeFileSync(p, s.replace('</head>', `${HIDE_STYLE}</head>`));
+  stylesInjected++;
 }
 
 // ── Pass 2: rename files whose NAME carries the capitalized brand ─────────────
@@ -202,8 +227,8 @@ for (let round = 0; round < 6 && pending.length > 0; round++) {
 
 console.log(
   `[fork-rebrand] "${NAME}" applied: ${totalHits} replacements in ${filesTouched} files, ` +
-    `${renamed} files renamed, ${rehashedCount} assets re-hashed (${refFixes} refs updated) ` +
-    `(roots: ${targets.join(', ')})`,
+    `${renamed} files renamed, ${stylesInjected} pages got the hide-list, ` +
+    `${rehashedCount} assets re-hashed (${refFixes} refs updated) (roots: ${targets.join(', ')})`,
 );
 if (filesTouched === 0) {
   console.warn('[fork-rebrand] WARNING: no files changed — did the build run first?');
