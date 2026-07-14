@@ -38,7 +38,10 @@ const RULES = [
   ['https://discord.gg/GjhnUsBtw', COMMUNITY],
   ['https://ko-fi.com/worldofclaudecraft', DONATE],
   ['ko-fi.com/worldofclaudecraft', DONATE.replace(/^https?:\/\//, '')],
-  ['github.com/levy-street/world-of-claudecraft', GITHUB],
+  // Bare owner/repo form too: DEFAULT_GITHUB_REPO in server/github_contributors.ts
+  // and the News/releases fetch use it without the github.com prefix; pointing it
+  // at the fork keeps upstream release notes (old brand) out of the in-game News.
+  ['levy-street/world-of-claudecraft', GITHUB.replace(/^github\.com\//, '')],
   // Social handles in JSON-LD sameAs entries.
   ['WoClaudeCraft', 'jorgelives'],
   ['WoClaudecraft', 'jorgelives'],
@@ -53,6 +56,13 @@ const RULES = [
   // Short brand, capitalized variants only (lowercase belongs to filenames/ids).
   ['ClaudeCraft', SHORT],
   ['Claudecraft', SHORT],
+  // ALL-CAPS wordmark strings (i18n brandWordmark: 'WORLD OF CLAUDECRAFT').
+  ['CLAUDECRAFT', SHORT.toUpperCase()],
+  // The in-game premium currency: "Claudium Balance", "Purchase Claudium"...
+  // Capitalized display form only — lowercase 'claudium' (route /api/claudium,
+  // config keys) is functional and stays. Key names like buyClaudium rename
+  // consistently on both definition and reference sides (global replace).
+  ['Claudium', 'Zulium'],
 ];
 
 // UI elements the fork hides outright (jorge 2026-07-14: no Donate, no GitHub
