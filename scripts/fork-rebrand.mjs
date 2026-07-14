@@ -72,9 +72,12 @@ const RULES = [
 // row, footer socials, and the mobile tray in one stroke.
 // #token-ca is the upstream $WOC crypto-token contract-address card on the home
 // screen — advertising THEIR token on the fork's page would mislead the chat.
+// The daily-rewards chest/window is also disabled in code (dailyRewardsEnabled
+// requires WALLET_ENABLED, src/main.ts) — the selectors here are belt and
+// suspenders against any other opener.
 const HIDE_SELECTORS =
   process.env.FORK_HIDE_SELECTORS ||
-  '[data-i18n-aria="a11y.githubProject"],[data-i18n-aria="a11y.donateProject"],#token-ca';
+  '[data-i18n-aria="a11y.githubProject"],[data-i18n-aria="a11y.donateProject"],#token-ca,#daily-rewards-button,#mobile-daily-rewards,#daily-rewards-window';
 const HIDE_STYLE = `<style data-fork-hide>${HIDE_SELECTORS}{display:none!important}</style>`;
 
 const TEXT_EXT = new Set([

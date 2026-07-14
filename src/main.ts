@@ -971,7 +971,11 @@ async function startGame(
       renderer.enableTargetConeDebug(tabConeHalfAt, TAB_NEAR_RADIUS, TAB_QUERY_RADIUS);
     }
     perf.setRenderer(renderer);
-    hud = new Hud(world, renderer, keybinds, { dailyRewardsEnabled: !NATIVE_APP });
+    // Fork: the daily-rewards window is a crypto-economy surface (wallet-gated
+    // $WOC leaderboard + Claudium store top-ups) — ship it only when the wallet
+    // UI itself is enabled, so the crypto-off fork shows no dead "Verify Wallet"
+    // prompts. (VITE_WALLET_DISABLED=1 => chest button + window + polls all off.)
+    hud = new Hud(world, renderer, keybinds, { dailyRewardsEnabled: !NATIVE_APP && WALLET_ENABLED });
     perf.setHud(hud);
     hydrateIcons(); // swap [data-icon] placeholders (micro-menu, mobile bar, meters) for inline SVG
   } catch (err) {
