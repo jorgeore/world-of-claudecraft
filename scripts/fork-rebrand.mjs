@@ -11,6 +11,7 @@
 //  - "woc"/"WoC" tokens (localStorage keys woc_session/woc_discord_choice,
 //    postMessage sources, woc_*.webp filenames) — functional identifiers;
 //  - "$WOC" (the wallet UI ships disabled via VITE_WALLET_DISABLED=1).
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -58,57 +59,66 @@ const TEXT_EXT = new Set([
   '.html', '.js', '.cjs', '.mjs', '.css', '.json', '.webmanifest',
   '.txt', '.xml', '.svg', '.map',
 ]);
-const SKIP_DIRS = new Set(['media', 'audio', 'assets/models']);
+const SKIP_DIRS = new Set(['media', 'audio']);
 
 const roots = process.argv.slice(2);
 const targets = roots.length ? roots : ['dist', 'dist-server', 'dist-bot'];
 
-let filesTouched = 0;
-let totalHits = 0;
-
-function walk(dir) {
+function listTextFiles(dir, out = []) {
   let entries;
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
   } catch {
-    return;
+    return out;
   }
   for (const e of entries) {
     const p = path.join(dir, e.name);
     if (e.isDirectory()) {
       if (SKIP_DIRS.has(e.name)) continue;
-      walk(p);
+      listTextFiles(p, out);
       continue;
     }
-    if (!TEXT_EXT.has(path.extname(e.name).toLowerCase())) continue;
-    let s;
-    try {
-      s = fs.readFileSync(p, 'utf8');
-    } catch {
-      continue;
-    }
-    let out = s;
-    let hits = 0;
-    for (const [from, to] of RULES) {
-      if (!out.includes(from)) continue;
-      const parts = out.split(from);
-      hits += parts.length - 1;
-      out = parts.join(to);
-    }
-    if (hits > 0) {
-      fs.writeFileSync(p, out);
-      filesTouched++;
-      totalHits += hits;
-    }
+    if (TEXT_EXT.has(path.extname(e.name).toLowerCase())) out.push(p);
+  }
+  return out;
+}
+
+function replaceAll(s, pairs) {
+  let out = s;
+  let hits = 0;
+  for (const [from, to] of pairs) {
+    if (!out.includes(from)) continue;
+    const parts = out.split(from);
+    hits += parts.length - 1;
+    out = parts.join(to);
+  }
+  return { out, hits };
+}
+
+// ── Pass 1: brand replace over every text file ────────────────────────────────
+let filesTouched = 0;
+let totalHits = 0;
+const changedFiles = new Set();
+const allTextFiles = targets.flatMap((r) => listTextFiles(r));
+for (const p of allTextFiles) {
+  let s;
+  try {
+    s = fs.readFileSync(p, 'utf8');
+  } catch {
+    continue;
+  }
+  const { out, hits } = replaceAll(s, RULES);
+  if (hits > 0) {
+    fs.writeFileSync(p, out);
+    filesTouched++;
+    totalHits += hits;
+    changedFiles.add(p);
   }
 }
 
-for (const root of targets) walk(root);
-
-// Filenames that carry the CAPITALIZED brand (e.g. the whitepaper PDF) also get
-// renamed, since the content replace above rewrote every reference to them.
-// Lowercase asset names (worldofclaudecraft-logo.png, woc_*.webp) stay put — the
-// RULES never touch lowercase tokens, so their references were preserved too.
+// ── Pass 2: rename files whose NAME carries the capitalized brand ─────────────
+// (e.g. the whitepaper PDF) — the content replace above rewrote every reference.
+// Lowercase asset names (worldofclaudecraft-logo.png, woc_*.webp) stay put.
 let renamed = 0;
 for (const root of targets) {
   let entries;
@@ -129,7 +139,72 @@ for (const root of targets) {
   }
 }
 
-console.log(`[fork-rebrand] "${NAME}" applied: ${totalHits} replacements in ${filesTouched} files, ${renamed} files renamed (roots: ${targets.join(', ')})`);
+// ── Pass 3: cache-bust edited hashed assets (to a fixpoint) ───────────────────
+// Vite hashes chunk filenames from their PRE-rebrand content, so an edited chunk
+// keeps its old name across builds while its bytes change — and immutable-cached
+// browsers keep serving the stale version forever (bit us with the i18n locale
+// chunks). Re-hash every edited assets/ file from its FINAL content and rewrite
+// all references. Reference rewrites change the REFERRERS' content too, so those
+// hashed referrers are re-hashed in the next round, up to a fixpoint: a file's
+// LAST rename always follows its last content change, so final name = hash of
+// final content and every referrer is updated after it (round cap guards true
+// import cycles). index.html and friends are unhashed and revalidated by the
+// browser, which terminates the chain.
+const HASHED_NAME = /^(.+)-([A-Za-z0-9_-]{8,})(\.[A-Za-z0-9.]+)$/;
+let rehashedCount = 0;
+let refFixes = 0;
+let pending = [...changedFiles];
+for (let round = 0; round < 6 && pending.length > 0; round++) {
+  const basenameMap = new Map(); // old basename -> new basename
+  for (const p of pending) {
+    if (!fs.existsSync(p)) continue;
+    if (!path.dirname(p).replace(/\\/g, '/').endsWith('/assets')) continue;
+    const base = path.basename(p);
+    // Sourcemaps ride along with their parent chunk, never renamed on their own.
+    if (base.endsWith('.map')) continue;
+    const m = HASHED_NAME.exec(base);
+    if (!m) continue;
+    const content = fs.readFileSync(p);
+    const fresh = createHash('md5').update(content).digest('hex').slice(0, 8);
+    if (fresh === m[2]) continue;
+    const next = `${m[1]}-${fresh}${m[3]}`;
+    fs.renameSync(p, path.join(path.dirname(p), next));
+    rehashedCount++;
+    basenameMap.set(base, next);
+    const mapPath = `${p}.map`;
+    if (fs.existsSync(mapPath)) {
+      fs.renameSync(mapPath, path.join(path.dirname(p), `${next}.map`));
+      basenameMap.set(`${base}.map`, `${next}.map`);
+    }
+  }
+  if (basenameMap.size === 0) break;
+  // Rewrite references everywhere; newly changed hashed assets feed the next round.
+  const nextPending = [];
+  const pairs = [...basenameMap.entries()];
+  for (const root of targets) {
+    for (const p of listTextFiles(root)) {
+      let s;
+      try {
+        s = fs.readFileSync(p, 'utf8');
+      } catch {
+        continue;
+      }
+      const { out, hits } = replaceAll(s, pairs);
+      if (hits > 0) {
+        fs.writeFileSync(p, out);
+        refFixes += hits;
+        nextPending.push(p);
+      }
+    }
+  }
+  pending = nextPending;
+}
+
+console.log(
+  `[fork-rebrand] "${NAME}" applied: ${totalHits} replacements in ${filesTouched} files, ` +
+    `${renamed} files renamed, ${rehashedCount} assets re-hashed (${refFixes} refs updated) ` +
+    `(roots: ${targets.join(', ')})`,
+);
 if (filesTouched === 0) {
   console.warn('[fork-rebrand] WARNING: no files changed — did the build run first?');
 }
