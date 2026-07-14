@@ -60,9 +60,11 @@ const RULES = [
 // data-i18n-aria attribute values are i18n KEYS, so they are locale-independent
 // and stable across upstream UI copy changes. Covers header CTA, home community
 // row, footer socials, and the mobile tray in one stroke.
+// #token-ca is the upstream $WOC crypto-token contract-address card on the home
+// screen — advertising THEIR token on the fork's page would mislead the chat.
 const HIDE_SELECTORS =
   process.env.FORK_HIDE_SELECTORS ||
-  '[data-i18n-aria="a11y.githubProject"],[data-i18n-aria="a11y.donateProject"]';
+  '[data-i18n-aria="a11y.githubProject"],[data-i18n-aria="a11y.donateProject"],#token-ca';
 const HIDE_STYLE = `<style data-fork-hide>${HIDE_SELECTORS}{display:none!important}</style>`;
 
 const TEXT_EXT = new Set([
