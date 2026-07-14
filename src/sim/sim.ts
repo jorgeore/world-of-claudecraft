@@ -7223,6 +7223,18 @@ export class Sim {
     return this.postOffice.mailInfoFor(pid);
   }
 
+  /**
+   * Fork (Livezul): book the community daily-chest letter for an online player.
+   * The server claims the once-per-day row in Postgres FIRST and only then
+   * calls this; returns false when the pid is gone (disconnect race).
+   */
+  grantCommunityDailyMail(pid: number): boolean {
+    const meta = this.players.get(pid);
+    if (!meta) return false;
+    this.postOffice.sendCommunityDaily(meta);
+    return true;
+  }
+
   mailUnreadFor(pid: number): number {
     return this.postOffice.mailUnreadFor(pid);
   }

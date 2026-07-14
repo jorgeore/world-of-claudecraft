@@ -80,3 +80,25 @@ export const QUEST_LETTERS: Record<string, LetterDef> = {
     delaySeconds: 150,
   },
 };
+
+// Fork (Livezul): the community daily chest. Sent by the server once per
+// account per day to Twitch-linked players on world enter (server/game.ts
+// grantCommunityDailyIfEligible -> PostOffice.sendCommunityDaily). letterId is
+// deliberately EMPTY: unregistered ids would render "undefined" through the
+// entity dictionary, while a falsy id makes the client splice the authored
+// sender/subject/body verbatim, exactly like player mail — no 22-locale
+// dictionary entries to maintain.
+export const DAILY_COMMUNITY_LETTER: LetterDef = {
+  letterId: '',
+  senderName: 'The Ravenpost',
+  subject: 'Your Livezul daily chest',
+  body:
+    'Adventurer,\n\n' +
+    'The ravens of Livezul salute you. For flying with our community, the ' +
+    'daily chest is yours: the coin enclosed is stamped with the wave of ' +
+    'Livezul.\n\n' +
+    'Come back tomorrow — the ravens never rest.\n\n' +
+    'Wings up,\nThe Ravenpost',
+  copper: 500,
+  delaySeconds: 0,
+};

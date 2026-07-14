@@ -14,6 +14,7 @@ import type { BankBonusFacts } from './bank_entitlements';
 import { seedChatFilterDefaults } from './chat_filter_db';
 import type { ChatLogRow } from './chat_log';
 import type { RankedDeedsAccount } from './deeds_board';
+import { COMMUNITY_DAILY_SCHEMA } from './community_daily_db';
 import { DISCORD_SCHEMA } from './discord_db';
 import { GITHUB_SCHEMA } from './github_db';
 import { TWITCH_SCHEMA } from './twitch_db';
@@ -830,6 +831,8 @@ export async function ensureSchema(): Promise<void> {
     // Twitch identity tables (links, oauth states, pending logins) for the
     // fork's Twitch login. FK-references accounts(id); idempotent like the rest.
     await client.query(TWITCH_SCHEMA);
+    // Community daily-chest claims (fork). FK-references accounts(id); idempotent.
+    await client.query(COMMUNITY_DAILY_SCHEMA);
     // Tier-2 global rate-limit backstop table (pg-backed fixed-window counters,
     // one row per (policy, key)) for the multi-realm deployment. Applied
     // unconditionally (idempotent), like the Discord/GitHub tables. See

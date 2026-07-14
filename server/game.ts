@@ -142,6 +142,9 @@ import {
 import { consumeMsgToken, createMsgRateBucket, type MsgRateBucketState } from './msg_rate_limit';
 import { nextRaidResetMs } from './raid_reset';
 import { REALM, REALM_PUBLIC_ORIGIN, REALM_RESET_TIME_ZONE } from './realm';
+import { DAILY_COMMUNITY_LETTER } from '../src/sim/content/letters';
+import { claimCommunityDaily } from './community_daily_db';
+import { twitchForAccount } from './twitch_db';
 import { createSerialWriter } from './serial_writer';
 import type { Presence, PresenceStatus, SocialActor, SocialTransport } from './social';
 import { SocialService } from './social';
@@ -2425,6 +2428,9 @@ export class GameServer {
     void touchCharacterLogin(characterId).catch((err) =>
       console.error('failed to stamp character last_login:', err),
     );
+    // Fork (Livezul): community daily chest for Twitch-linked accounts (fresh
+    // joins only — resumes returned above). Best-effort like the hooks below.
+    this.grantCommunityDailyIfEligible(pid, accountId, session);
     // Book of Deeds drift heal: the character_deeds index is written
     // fire-and-forget per unlock, and the sim never re-emits a deed already in
     // the state blob, so a transient per-unlock insert failure leaves the index
@@ -2893,6 +2899,38 @@ export class GameServer {
     } catch (err) {
       console.error('failed to save mail:', err);
     }
+  }
+
+  // Fork (Livezul): the community daily chest. Twitch-linked accounts get one
+  // system letter with coin per UTC day (the game's daily boundary), account-
+  // wide. Order matters: the Postgres claim is the atomic once-per-day guard
+  // and is taken BEFORE booking the letter (first caller wins; a crash between
+  // the two costs at most one day's letter, never a duplicate). Fire-and-forget
+  // from join(), mirroring the other best-effort login hooks — a DB hiccup must
+  // never block entering the world.
+  private grantCommunityDailyIfEligible(
+    pid: number,
+    accountId: number,
+    session: ClientSession,
+  ): void {
+    const day = this.sim.utcDay;
+    void (async () => {
+      const link = await twitchForAccount(pool, accountId);
+      if (!link) return; // no Twitch linked -> no chest (the community condition)
+      const first = await claimCommunityDaily(
+        pool,
+        accountId,
+        day,
+        REALM,
+        DAILY_COMMUNITY_LETTER.copper ?? 0,
+      );
+      if (!first) return; // already claimed today somewhere on this account
+      // The player may have disconnected while we talked to Postgres.
+      if (this.clients.get(pid) !== session) return;
+      this.sim.grantCommunityDailyMail(pid);
+      // Tighten the crash window between the durable claim and the mail blob.
+      void this.saveMail();
+    })().catch((err) => console.error('community daily grant failed:', err));
   }
 
   rekeyMarketSeller(characterId: number, oldName: string, newName: string): boolean {

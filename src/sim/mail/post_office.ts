@@ -16,7 +16,12 @@
 // `src/sim`-pure: no DOM/Three/render-ui-game-net imports, no Math.random/
 // Date.now (enforced by tests/architecture.test.ts). The post draws NO rng.
 
-import { type LetterDef, QUEST_LETTERS, WELCOME_LETTER } from '../content/letters';
+import {
+  DAILY_COMMUNITY_LETTER,
+  type LetterDef,
+  QUEST_LETTERS,
+  WELCOME_LETTER,
+} from '../content/letters';
 import { ITEMS } from '../data';
 import type { PlayerMeta } from '../sim';
 import type { SimContext } from '../sim_context';
@@ -470,6 +475,13 @@ export class PostOffice {
   // The one-time service letter; the caller flips meta.mailWelcomed.
   sendWelcome(meta: PlayerMeta): void {
     this.sendLetter(this.mailKeyFor(meta), meta.name, WELCOME_LETTER, 'system');
+  }
+
+  // Fork (Livezul): the community daily chest. Once-per-day gating lives
+  // server-side (community_daily_claims claim BEFORE this call); the sim just
+  // books the authored letter.
+  sendCommunityDaily(meta: PlayerMeta): void {
+    this.sendLetter(this.mailKeyFor(meta), meta.name, DAILY_COMMUNITY_LETTER, 'system');
   }
 
   // Quest turn-in hook (turnInQuestCore): quests with an authored letter have
