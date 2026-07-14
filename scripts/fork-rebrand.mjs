@@ -24,6 +24,15 @@ const REALM_WORD = process.env.FORK_REALM_WORD || 'Jorgelives';
 
 // [from, to] — applied in order, plain string replace (all occurrences).
 const RULES = [
+  // Community-button labels in the fork's audience languages: the href already
+  // points at the Twitch channel, so the visible label follows. (Discord LOGIN
+  // is disabled at build time via VITE_DISCORD_DISABLED=1; these are the
+  // always-visible footer/menu community links.)
+  ['Join the Discord', 'Live on Twitch'],
+  ['Entre no Discord', 'Live na Twitch'],
+  ['Entrar no Discord', 'Live na Twitch'],
+  ['Juntar-se ao Discord', 'Live na Twitch'],
+  ['Únete al Discord', 'Live en Twitch'],
   // Community/external links first (before the domain rule rewrites their hosts).
   ['https://discord.gg/GjhnUsBtw', COMMUNITY],
   ['https://ko-fi.com/worldofclaudecraft', DONATE],
