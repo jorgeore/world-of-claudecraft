@@ -79,7 +79,7 @@ const HIDE_STYLE = `<style data-fork-hide>${HIDE_SELECTORS}{display:none!importa
 
 const TEXT_EXT = new Set([
   '.html', '.js', '.cjs', '.mjs', '.css', '.json', '.webmanifest',
-  '.txt', '.xml', '.svg', '.map',
+  '.txt', '.xml', '.svg', '.map', '.md',
 ]);
 const SKIP_DIRS = new Set(['media', 'audio']);
 
