@@ -6,7 +6,7 @@
 import type { IdleAutopilot } from './autopilot';
 import { installIdlePanel } from './idle_panel';
 
-export function installIdleUi(autopilot: IdleAutopilot): void {
+export function installIdleUi(autopilot: IdleAutopilot): { panelToggle: () => void } {
   const cluster = document.getElementById('side-buttons');
   const ui = document.getElementById('ui') ?? document.body;
   const panel = installIdlePanel(autopilot);
@@ -80,4 +80,6 @@ export function installIdleUi(autopilot: IdleAutopilot): void {
   // Debug/observability handle (used by the deploy smoke test; harmless — the
   // autopilot only issues the same commands a keyboard could).
   (window as { __livezulIdle?: IdleAutopilot }).__livezulIdle = autopilot;
+
+  return { panelToggle: () => panel.toggle() };
 }

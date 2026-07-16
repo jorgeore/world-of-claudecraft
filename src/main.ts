@@ -1262,8 +1262,11 @@ async function startGame(
 
   // Fork (Livezul): IDLE auto-farm mode. The autopilot substitutes for the
   // keyboard through the same IWorld commands (server stays authoritative);
-  // hooks: decision tick in frame(), movement supplier in resolveMove().
-  const idleAutopilot = new IdleAutopilot(world);
+  // hooks: decision tick in frame(), movement supplier in resolveMove(). The
+  // ability-name resolver localizes rotation labels to the player's locale.
+  const idleAutopilot = new IdleAutopilot(world, (id, en) =>
+    tEntity({ kind: 'ability', id, field: 'name' }) || en,
+  );
   installIdleUi(idleAutopilot);
 
   const mobileControls = new MobileControls(input, {

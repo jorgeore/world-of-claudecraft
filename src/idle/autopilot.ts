@@ -50,6 +50,11 @@ function defaultConfig(): IdleConfig {
 const CONFIG_KEY_PREFIX = 'livezul_idle_cfg_v1_';
 const POTION_RETRY_S = 6; // server enforces the real potion cooldown; be polite
 
+// Injected from main.ts so src/idle/ stays decoupled from the i18n layer:
+// resolves an ability id to its name in the player's selected locale
+// (tEntity kind:'ability'). Falls back to the raw English def.name.
+export type AbilityNameFn = (id: string, englishName: string) => string;
+
 const TARGET_SCAN_RADIUS = 40; // same reach as the mobile attack-nearest button
 const LEASH_RADIUS = 45; // farm only this far from the anchor
 const MELEE_STOP = 3.0; // approach stop distance (melee reach)
@@ -129,7 +134,10 @@ export class IdleAutopilot {
   private eatRetry = 0;
   private configLoadedFor = '';
 
-  constructor(private world: IWorld) {}
+  constructor(
+    private world: IWorld,
+    private abilityName: AbilityNameFn = (_id, en) => en,
+  ) {}
 
   // ── config persistence (per character, survives OBS-source refreshes) ─────
   private configKey(): string {
@@ -166,11 +174,12 @@ export class IdleAutopilot {
     const kept = this.config.skills.filter((s) => byId.has(s.id));
     const known = new Set(kept.map((s) => s.id));
     for (const m of metas) {
-      if (!known.has(m.id)) kept.push({ id: m.id, name: m.name, enabled: true });
+      if (!known.has(m.id)) kept.push({ id: m.id, name: this.abilityName(m.id, m.name), enabled: true });
     }
+    // Refresh the display name in the player's current locale every sync.
     for (const s of kept) {
       const m = byId.get(s.id);
-      if (m) s.name = m.name;
+      if (m) s.name = this.abilityName(m.id, m.name);
     }
     this.config.skills = kept;
   }
