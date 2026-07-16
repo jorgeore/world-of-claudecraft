@@ -5,6 +5,7 @@ import './styles/index.css';
 import { syncAppViewport as syncAppViewportShared } from './game/app_viewport';
 import { IdleAutopilot } from './idle/autopilot';
 import { installIdleUi } from './idle/idle_ui';
+import { startSpectatorMode } from './spectator/spectator';
 import { audio } from './game/audio';
 import { AutoLoot } from './game/autoloot';
 import {
@@ -1268,6 +1269,38 @@ async function startGame(
     tEntity({ kind: 'ability', id, field: 'name' }) || en,
   );
   installIdleUi(idleAutopilot);
+
+  // Fork (Livezul): guided spectator camera for an OBS browser source. With
+  // ?spectator=1 (as the moderator camera account), auto-enter the world and
+  // rotate the built-in /spectate camera across online players. Server unchanged.
+  const spectatorParams = new URLSearchParams(location.search);
+  if (spectatorParams.get('spectator') === '1') {
+    const dwell = Number(spectatorParams.get('dwell')) || 15;
+    startSpectatorMode(world, {
+      getToken: () => api.token,
+      selfName: api.username,
+      dwellMs: dwell * 1000,
+    });
+    void (async () => {
+      // Best-effort hands-off entry when a session already exists; if not, the
+      // owner logs in once and the controller self-starts on world-ready.
+      try {
+        if (!api.token) return;
+        const dir = await api.realms();
+        const remembered = localStorage.getItem(LAST_REALM_KEY);
+        const realm = dir.realms.find((r) => r.name === remembered) ?? dir.realms[0];
+        if (realm) {
+          api.setRealm(realm.url);
+          api.realm = realm.name;
+          localStorage.setItem(LAST_REALM_KEY, realm.name);
+        }
+        const chars = await api.characters();
+        if (chars.length) await enterWorld(chars[0]);
+      } catch (err) {
+        console.error('[spectator] auto-enter failed', err);
+      }
+    })();
+  }
 
   const mobileControls = new MobileControls(input, {
     onCycleTarget: () => world.tabTarget(),
