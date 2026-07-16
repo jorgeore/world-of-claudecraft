@@ -15,8 +15,40 @@
 //    seconds blacklists the target and rescans (cheap, no pathfinding in v1).
 //  - Any manual movement key or click-move cancels the mode (main.ts hook).
 import { isAttackableEntity } from '../game/interactions';
+import { ITEMS } from '../sim/data';
 import { dist2d, type Entity, INTERACT_RANGE, type MoveInput } from '../sim/types';
 import type { IWorld } from '../world_api';
+
+// ── Player-tunable configuration (edited through the IDLE panel) ─────────────
+export interface IdleSkillCfg {
+  id: string;
+  name: string;
+  enabled: boolean;
+}
+
+export interface IdleConfig {
+  /** Rotation, in priority order: first enabled+ready+in-range ability casts. */
+  skills: IdleSkillCfg[];
+  hpPotionEnabled: boolean;
+  hpPotionPct: number; // drink a healing potion below this hp fraction (combat ok)
+  manaPotionEnabled: boolean;
+  manaPotionPct: number;
+  eatDrinkEnabled: boolean; // eat/drink while resting instead of slow natural regen
+}
+
+function defaultConfig(): IdleConfig {
+  return {
+    skills: [],
+    hpPotionEnabled: true,
+    hpPotionPct: 0.35,
+    manaPotionEnabled: true,
+    manaPotionPct: 0.25,
+    eatDrinkEnabled: true,
+  };
+}
+
+const CONFIG_KEY_PREFIX = 'livezul_idle_cfg_v1_';
+const POTION_RETRY_S = 6; // server enforces the real potion cooldown; be polite
 
 const TARGET_SCAN_RADIUS = 40; // same reach as the mobile attack-nearest button
 const LEASH_RADIUS = 45; // farm only this far from the anchor
@@ -68,6 +100,7 @@ function moveForward(): MoveInput {
 export class IdleAutopilot {
   active = false;
   kills = 0;
+  config: IdleConfig = defaultConfig();
 
   private state: IdleState = 'off';
   private time = 0;
@@ -91,8 +124,56 @@ export class IdleAutopilot {
   // just inside the longest offensive ability range for casters/hunters — so a
   // mage opens with a bolt from afar instead of strolling into punch range.
   private engageDist = MELEE_STOP;
+  private potionRetryHp = 0;
+  private potionRetryMana = 0;
+  private eatRetry = 0;
+  private configLoadedFor = '';
 
   constructor(private world: IWorld) {}
+
+  // ── config persistence (per character, survives OBS-source refreshes) ─────
+  private configKey(): string {
+    return `${CONFIG_KEY_PREFIX}${this.world.player?.name ?? 'default'}`;
+  }
+
+  loadConfig(): void {
+    const key = this.configKey();
+    if (this.configLoadedFor === key) return;
+    this.configLoadedFor = key;
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) this.config = { ...defaultConfig(), ...(JSON.parse(raw) as Partial<IdleConfig>) };
+    } catch {
+      this.config = defaultConfig();
+    }
+    this.syncSkillsFromKnown();
+  }
+
+  saveConfig(): void {
+    try {
+      localStorage.setItem(this.configKey(), JSON.stringify(this.config));
+    } catch {
+      /* storage disabled */
+    }
+  }
+
+  /** Reconcile the configured rotation with the CURRENT known kit: keep the
+   *  player's order/toggles, append newly learned abilities (enabled), drop
+   *  unlearned ones (respec). Called on start and whenever the panel opens. */
+  syncSkillsFromKnown(): void {
+    const metas = this.offensiveAbilities();
+    const byId = new Map(metas.map((m) => [m.id, m]));
+    const kept = this.config.skills.filter((s) => byId.has(s.id));
+    const known = new Set(kept.map((s) => s.id));
+    for (const m of metas) {
+      if (!known.has(m.id)) kept.push({ id: m.id, name: m.name, enabled: true });
+    }
+    for (const s of kept) {
+      const m = byId.get(s.id);
+      if (m) s.name = m.name;
+    }
+    this.config.skills = kept;
+  }
 
   status(): string {
     return this.statusText;
@@ -105,6 +186,7 @@ export class IdleAutopilot {
 
   start(): void {
     const p = this.world.player;
+    this.loadConfig();
     this.active = true;
     this.kills = 0;
     this.anchor = { x: p.pos.x, z: p.pos.z };
@@ -203,6 +285,7 @@ export class IdleAutopilot {
 
     const p = this.world.player;
     this.engageDist = this.computeEngageDist();
+    this.maybeUsePotions(p);
 
     // ── death loop ──────────────────────────────────────────────────────────
     if (p.dead || p.ghost) {
@@ -353,7 +436,12 @@ export class IdleAutopilot {
 
       case 'rest': {
         const pct = p.hp / Math.max(1, p.maxHp);
-        this.statusText = `IDLE: descansando (${Math.round(pct * 100)}%)`;
+        this.restConsume(p);
+        this.statusText = p.eating
+          ? `IDLE: comendo (${Math.round(pct * 100)}%)`
+          : p.drinking
+            ? 'IDLE: bebendo…'
+            : `IDLE: descansando (${Math.round(pct * 100)}%)`;
         if (p.inCombat) {
           const attacker = this.findAttacker(p);
           if (attacker) {
@@ -467,8 +555,8 @@ export class IdleAutopilot {
 
   /** Offensive, directly-castable abilities of the kit: enemy-targeted (the
    *  targetType default), no ground aiming, no form/proc preconditions. */
-  private offensiveAbilities(): { id: string; range: number; minRange: number; cost: number; offGcd: boolean; hpBelow?: number }[] {
-    const out: { id: string; range: number; minRange: number; cost: number; offGcd: boolean; hpBelow?: number }[] = [];
+  private offensiveAbilities(): { id: string; name: string; range: number; minRange: number; cost: number; offGcd: boolean; hpBelow?: number }[] {
+    const out: { id: string; name: string; range: number; minRange: number; cost: number; offGcd: boolean; hpBelow?: number }[] = [];
     for (const known of this.world.known) {
       const def = known.def;
       if (!def) continue;
@@ -478,6 +566,7 @@ export class IdleAutopilot {
       if (def.requiresForm || def.requiresDodgeProc) continue;
       out.push({
         id: def.id,
+        name: def.name,
         range: def.range ?? 0,
         minRange: def.minRange ?? 0,
         cost: known.cost,
@@ -497,13 +586,17 @@ export class IdleAutopilot {
     return Math.max(RANGED_MIN_ENGAGE, maxRange - 2);
   }
 
-  /** Cast the first ready ability that can legally hit the target from HERE
-   *  (readiness formula from the RL encoder + range/minRange/execute checks).
-   *  Never starts a cast while one is already running. */
+  /** Cast the first ENABLED rotation ability (panel priority order) that can
+   *  legally hit the target from HERE (readiness formula from the RL encoder +
+   *  range/minRange/execute checks). Never overlaps a running cast. */
   private castSomethingUseful(p: Entity, target: Entity): void {
     if (p.castingAbility) return;
     const dist = dist2d(p.pos, target.pos);
-    for (const a of this.offensiveAbilities()) {
+    const metas = new Map(this.offensiveAbilities().map((m) => [m.id, m]));
+    for (const cfg of this.config.skills) {
+      if (!cfg.enabled) continue;
+      const a = metas.get(cfg.id);
+      if (!a) continue;
       const inRange = a.range === 0 ? dist <= MELEE_STOP + 0.5 : dist <= a.range - 0.3 && dist >= a.minRange + 0.2;
       if (!inRange) continue;
       if (a.hpBelow !== undefined && target.hp / Math.max(1, target.maxHp) > a.hpBelow) continue;
@@ -512,6 +605,76 @@ export class IdleAutopilot {
       if (!ready) continue;
       this.world.castAbility(a.id);
       break;
+    }
+  }
+
+  // ── consumables (panel-configured) ────────────────────────────────────────
+
+  /** Weakest sufficient consumable of a kind, so the good potions are saved.
+   *  kind 'potion' filters by which payload field it restores. */
+  private findConsumable(kind: 'food' | 'drink' | 'potion', restores?: 'hp' | 'mana'): string | null {
+    let bestId: string | null = null;
+    let bestPower = Number.POSITIVE_INFINITY;
+    for (const slot of this.world.inventory) {
+      const def = ITEMS[slot.itemId];
+      if (!def || def.kind !== kind) continue;
+      if (kind === 'potion') {
+        const power = restores === 'mana' ? def.potionMana : def.potionHp;
+        if (!power) continue;
+        if (power < bestPower) {
+          bestPower = power;
+          bestId = slot.itemId;
+        }
+      } else {
+        return slot.itemId; // any food/drink will do
+      }
+    }
+    return bestId;
+  }
+
+  /** Emergency potions — allowed in combat, on a polite client-side retry
+   *  spacing (the server enforces the real shared potion cooldown). */
+  private maybeUsePotions(p: Entity): void {
+    if (p.dead) return;
+    if (this.config.hpPotionEnabled && p.hp / Math.max(1, p.maxHp) < this.config.hpPotionPct) {
+      if (this.time - this.potionRetryHp > POTION_RETRY_S) {
+        this.potionRetryHp = this.time;
+        const id = this.findConsumable('potion', 'hp');
+        if (id) this.world.useItem(id);
+      }
+    }
+    if (
+      this.config.manaPotionEnabled &&
+      p.resourceType === 'mana' &&
+      p.resource / Math.max(1, p.maxResource) < this.config.manaPotionPct
+    ) {
+      if (this.time - this.potionRetryMana > POTION_RETRY_S) {
+        this.potionRetryMana = this.time;
+        const id = this.findConsumable('potion', 'mana');
+        if (id) this.world.useItem(id);
+      }
+    }
+  }
+
+  /** While resting out of combat: eat when hurt, drink when low on mana —
+   *  instead of waiting on slow natural regen (the obs.ts eat_drink pattern). */
+  private restConsume(p: Entity): void {
+    if (!this.config.eatDrinkEnabled || p.inCombat) return;
+    if (this.time - this.eatRetry < 2) return;
+    if (!p.eating && p.hp < p.maxHp * 0.9) {
+      const id = this.findConsumable('food');
+      if (id) {
+        this.eatRetry = this.time;
+        this.world.useItem(id);
+        return;
+      }
+    }
+    if (!p.drinking && p.resourceType === 'mana' && p.resource < p.maxResource * 0.9) {
+      const id = this.findConsumable('drink');
+      if (id) {
+        this.eatRetry = this.time;
+        this.world.useItem(id);
+      }
     }
   }
 

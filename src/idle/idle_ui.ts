@@ -4,10 +4,12 @@
 // minimized tab stalls rAF while the server keeps applying the last direction;
 // an OBS browser source stays "visible" so streams are unaffected).
 import type { IdleAutopilot } from './autopilot';
+import { installIdlePanel } from './idle_panel';
 
 export function installIdleUi(autopilot: IdleAutopilot): void {
   const cluster = document.getElementById('side-buttons');
   const ui = document.getElementById('ui') ?? document.body;
+  const panel = installIdlePanel(autopilot);
 
   const btn = document.createElement('button');
   btn.type = 'button';
@@ -25,6 +27,20 @@ export function installIdleUi(autopilot: IdleAutopilot): void {
     paint();
   });
   cluster?.appendChild(btn);
+
+  const cfgBtn = document.createElement('button');
+  cfgBtn.type = 'button';
+  cfgBtn.id = 'mm-idle-cfg';
+  cfgBtn.className = 'micro-btn';
+  cfgBtn.title = 'Configurar IDLE (rotação, poções, descanso)';
+  cfgBtn.setAttribute('aria-label', 'Configurar IDLE');
+  cfgBtn.textContent = '⚙';
+  cfgBtn.style.fontSize = '12px';
+  cfgBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    panel.toggle();
+  });
+  cluster?.appendChild(cfgBtn);
 
   const status = document.createElement('div');
   status.id = 'idle-status';
