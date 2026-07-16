@@ -3,6 +3,8 @@
 // styles both game entries; admin/guide use their own entries and inline CSS.
 import './styles/index.css';
 import { syncAppViewport as syncAppViewportShared } from './game/app_viewport';
+import { IdleAutopilot } from './idle/autopilot';
+import { installIdleUi } from './idle/idle_ui';
 import { audio } from './game/audio';
 import { AutoLoot } from './game/autoloot';
 import {
@@ -1258,6 +1260,12 @@ async function startGame(
   // this is wired); the Target button cycles targets via the Tab path below.
   hud.onMobileAttackNearest = () => attackNearest();
 
+  // Fork (Livezul): IDLE auto-farm mode. The autopilot substitutes for the
+  // keyboard through the same IWorld commands (server stays authoritative);
+  // hooks: decision tick in frame(), movement supplier in resolveMove().
+  const idleAutopilot = new IdleAutopilot(world);
+  installIdleUi(idleAutopilot);
+
   const mobileControls = new MobileControls(input, {
     onCycleTarget: () => world.tabTarget(),
     onJump: () => input.triggerTouchJump(),
@@ -2397,6 +2405,23 @@ async function startGame(
   ): { mi: ReturnType<typeof input.readMoveInput>; facing: number | null } {
     attackMoveTick();
     const mi = input.readMoveInput();
+    // Fork (Livezul): while IDLE mode is driving, it supplies movement+facing;
+    // any manual movement key or click-move hands control back to the player.
+    if (idleAutopilot.active) {
+      if (
+        mi.forward ||
+        mi.back ||
+        mi.turnLeft ||
+        mi.turnRight ||
+        mi.strafeLeft ||
+        mi.strafeRight ||
+        input.clickMoveTarget
+      ) {
+        idleAutopilot.stop('você assumiu o controle');
+      } else if (!movementFrozen()) {
+        return idleAutopilot.resolveMove(playerPos, playerFacing);
+      }
+    }
     let facing: number | null = mouselook ? input.camYaw : null;
     if (input.clickMoveTarget) {
       const action = resolveClickMoveAction(mi, {
@@ -2584,6 +2609,8 @@ async function startGame(
     // character behind it (other windows stay non-modal, as before); the
     // first-spawn intro cinematic holds movement the same way until it lands
     input.setSuspendMovement(!gameInputReady || hud.isModalOpen() || intro !== null);
+    // Fork (Livezul): IDLE-mode decision tick (no-op while inactive).
+    idleAutopilot.update(frameDt);
     const playerDead = world.player.dead;
     if (shouldClearAutorunOnDeath(playerWasDead, playerDead)) {
       input.setAutorun(false);
