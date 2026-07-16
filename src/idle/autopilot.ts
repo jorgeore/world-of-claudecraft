@@ -21,7 +21,8 @@ import type { IWorld } from '../world_api';
 const TARGET_SCAN_RADIUS = 40; // same reach as the mobile attack-nearest button
 const LEASH_RADIUS = 45; // farm only this far from the anchor
 const MELEE_STOP = 3.0; // approach stop distance (melee reach)
-const CHASE_RESUME = 4.5; // re-approach if the mob slips beyond this
+const CHASE_SLACK = 3.0; // re-approach if the mob slips this far beyond engage range
+const RANGED_MIN_ENGAGE = 8; // an offensive kit reaching at least this far = ranged class
 const LOOT_SCAN_RADIUS = 30;
 const LOOT_STOP = INTERACT_RANGE - 1;
 const REST_ENTER_PCT = 0.4;
@@ -86,6 +87,10 @@ export class IdleAutopilot {
   private emptyScanFor = 0;
   private stuckTimer = 0;
   private stuckStartDist = Number.POSITIVE_INFINITY;
+  // Engagement distance derived from the class kit: melee reach for warriors,
+  // just inside the longest offensive ability range for casters/hunters — so a
+  // mage opens with a bolt from afar instead of strolling into punch range.
+  private engageDist = MELEE_STOP;
 
   constructor(private world: IWorld) {}
 
@@ -149,18 +154,26 @@ export class IdleAutopilot {
       const mi = moveWhenFar && d > stopDist ? moveForward() : { ...NO_MOVE };
       return { mi, facing };
     };
+    // Moving cancels casts (castWhileMoving is rare) — while a cast bar is up,
+    // stand still no matter what the state wants.
+    const casting = !!this.world.player.castingAbility;
     switch (this.state) {
       case 'approach': {
         const t = this.targetId !== null ? this.world.entities.get(this.targetId) : undefined;
-        if (t) return follow({ x: t.pos.x, z: t.pos.z }, MELEE_STOP, true);
+        if (t) return follow({ x: t.pos.x, z: t.pos.z }, this.engageDist, !casting);
         break;
       }
       case 'combat': {
         const t = this.targetId !== null ? this.world.entities.get(this.targetId) : undefined;
-        // Face the target always; step forward only if it slipped out of reach.
+        // Face the target always; step forward only if it slipped well beyond
+        // our engagement range (and never while casting).
         if (t) {
           const d = dist2d(playerPos as Entity['pos'], t.pos);
-          return follow({ x: t.pos.x, z: t.pos.z }, MELEE_STOP, d > CHASE_RESUME);
+          return follow(
+            { x: t.pos.x, z: t.pos.z },
+            this.engageDist,
+            !casting && d > this.engageDist + CHASE_SLACK,
+          );
         }
         break;
       }
@@ -189,6 +202,7 @@ export class IdleAutopilot {
     this.decideTimer = DECIDE_MIN_S + Math.random() * DECIDE_JITTER_S;
 
     const p = this.world.player;
+    this.engageDist = this.computeEngageDist();
 
     // ── death loop ──────────────────────────────────────────────────────────
     if (p.dead || p.ghost) {
@@ -276,8 +290,11 @@ export class IdleAutopilot {
           this.enter('scan');
           break;
         }
-        if (dist2d(p.pos, t.pos) <= MELEE_STOP + 0.2) {
+        if (dist2d(p.pos, t.pos) <= this.engageDist + 0.2) {
           this.enter('combat');
+          // Auto-attack toggles on regardless of distance: for melee weapons an
+          // out-of-range swing is a silent no-op, for hunters/wands the auto IS
+          // the ranged shot — one toggle covers both kits.
           this.world.startAutoAttack();
           this.attackRefresh = this.time;
         }
@@ -304,8 +321,9 @@ export class IdleAutopilot {
           this.attackRefresh = this.time;
           this.world.startAutoAttack();
         }
-        this.castSomethingUseful(p);
-        this.statusText = `IDLE: atacando ${t.name} (${this.kills} abates)`;
+        this.castSomethingUseful(p, t);
+        const ranged = this.engageDist > MELEE_STOP + 1;
+        this.statusText = `IDLE: atacando ${t.name}${ranged ? ' à distância' : ''} (${this.kills} abates)`;
         break;
       }
 
@@ -447,17 +465,52 @@ export class IdleAutopilot {
     return best;
   }
 
-  /** Cast the first ready, castable-at-target ability (readiness formula from
-   *  the RL encoder: cooldown done, resource affordable, GCD clear). Ground-
-   *  target ('position') abilities are skipped — v1 keeps aiming simple. */
-  private castSomethingUseful(p: Entity): void {
+  /** Offensive, directly-castable abilities of the kit: enemy-targeted (the
+   *  targetType default), no ground aiming, no form/proc preconditions. */
+  private offensiveAbilities(): { id: string; range: number; minRange: number; cost: number; offGcd: boolean; hpBelow?: number }[] {
+    const out: { id: string; range: number; minRange: number; cost: number; offGcd: boolean; hpBelow?: number }[] = [];
     for (const known of this.world.known) {
       const def = known.def;
-      if (!def || def.targetMode === 'position') continue;
-      const cd = p.cooldowns.get(def.id) ?? 0;
-      const ready = cd <= 0 && p.resource >= known.cost && (def.offGcd || p.gcdRemaining <= 0);
+      if (!def) continue;
+      if (def.targetMode === 'position') continue;
+      if ((def.targetType ?? 'enemy') !== 'enemy') continue;
+      if (!def.requiresTarget) continue;
+      if (def.requiresForm || def.requiresDodgeProc) continue;
+      out.push({
+        id: def.id,
+        range: def.range ?? 0,
+        minRange: def.minRange ?? 0,
+        cost: known.cost,
+        offGcd: !!def.offGcd,
+        hpBelow: def.requiresTargetHpBelow,
+      });
+    }
+    return out;
+  }
+
+  /** Melee reach for a melee kit; just inside the longest offensive ability
+   *  range for a ranged kit (mage/hunter/warlock), so pulls open from afar. */
+  private computeEngageDist(): number {
+    let maxRange = 0;
+    for (const a of this.offensiveAbilities()) maxRange = Math.max(maxRange, a.range);
+    if (maxRange < RANGED_MIN_ENGAGE) return MELEE_STOP;
+    return Math.max(RANGED_MIN_ENGAGE, maxRange - 2);
+  }
+
+  /** Cast the first ready ability that can legally hit the target from HERE
+   *  (readiness formula from the RL encoder + range/minRange/execute checks).
+   *  Never starts a cast while one is already running. */
+  private castSomethingUseful(p: Entity, target: Entity): void {
+    if (p.castingAbility) return;
+    const dist = dist2d(p.pos, target.pos);
+    for (const a of this.offensiveAbilities()) {
+      const inRange = a.range === 0 ? dist <= MELEE_STOP + 0.5 : dist <= a.range - 0.3 && dist >= a.minRange + 0.2;
+      if (!inRange) continue;
+      if (a.hpBelow !== undefined && target.hp / Math.max(1, target.maxHp) > a.hpBelow) continue;
+      const cd = p.cooldowns.get(a.id) ?? 0;
+      const ready = cd <= 0 && p.resource >= a.cost && (a.offGcd || p.gcdRemaining <= 0);
       if (!ready) continue;
-      this.world.castAbility(def.id);
+      this.world.castAbility(a.id);
       break;
     }
   }
