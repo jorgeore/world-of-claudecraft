@@ -18,12 +18,9 @@ interface OnlineRow {
 }
 
 export interface SpectatorOptions {
-  getToken: () => string | null;
-  selfName: string | null;
-  dwellMs: number; // seconds per player on camera
+  key: string; // shared secret for the fork spectator endpoints
+  dwellMs: number; // ms per player on camera
 }
-
-const ROSTER_URL = '/admin/api/online';
 const CLASS_PT: Record<string, string> = {
   warrior: 'Guerreiro',
   paladin: 'Paladino',
@@ -53,15 +50,13 @@ export function startSpectatorMode(world: IWorld, opts: SpectatorOptions): void 
   };
 
   async function fetchRoster(): Promise<OnlineRow[]> {
-    const token = opts.getToken();
-    if (!token) return [];
     try {
-      const res = await fetch(ROSTER_URL, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`/api/spectator/roster?key=${encodeURIComponent(opts.key)}`);
       if (!res.ok) return [];
-      const data = (await res.json()) as { players?: OnlineRow[] } | OnlineRow[];
-      const rows = Array.isArray(data) ? data : (data.players ?? []);
-      // Drop the camera account itself; /spectate refuses self + staff anyway.
-      return rows.filter((r) => r.name && r.name !== opts.selfName);
+      const data = (await res.json()) as { players?: OnlineRow[] };
+      const self = world.player?.name;
+      // The server already drops staff sessions; also guard our own character.
+      return (data.players ?? []).filter((r) => r.name && r.name !== self);
     } catch {
       return [];
     }
@@ -91,7 +86,7 @@ export function startSpectatorMode(world: IWorld, opts: SpectatorOptions): void 
   // start rotating. Robust to however entry happened (auto or a one-time login).
   const waitReady = window.setInterval(() => {
     if (ready) return;
-    if (world.entities.size > 0 && opts.getToken()) {
+    if (world.entities.size > 0 && world.player?.name) {
       ready = true;
       window.clearInterval(waitReady);
       document.body.classList.add('spectator-cam'); // now hide the HUD

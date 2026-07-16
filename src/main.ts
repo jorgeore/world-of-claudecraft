@@ -1276,15 +1276,24 @@ async function startGame(
   const spectatorParams = new URLSearchParams(location.search);
   if (spectatorParams.get('spectator') === '1') {
     const dwell = Number(spectatorParams.get('dwell')) || 15;
-    startSpectatorMode(world, {
-      getToken: () => api.token,
-      selfName: api.username,
-      dwellMs: dwell * 1000,
-    });
+    const spectatorKey = spectatorParams.get('key') ?? '';
+    startSpectatorMode(world, { key: spectatorKey, dwellMs: dwell * 1000 });
     void (async () => {
-      // Best-effort hands-off entry when a session already exists; if not, the
-      // owner logs in once and the controller self-starts on world-ready.
+      // Fully hands-off entry for an OBS browser source (no login possible): the
+      // ?key= secret fetches a camera-account session from the server, then we
+      // auto-select the realm + character and enter the world. The controller
+      // then hides the HUD and starts rotating once snapshots flow.
       try {
+        if (spectatorKey && !api.token) {
+          const cfg = await fetch(`/api/spectator/session?key=${encodeURIComponent(spectatorKey)}`)
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null);
+          if (cfg?.token) {
+            api.token = cfg.token;
+            api.username = cfg.username;
+            api.saveSession();
+          }
+        }
         if (!api.token) return;
         const dir = await api.realms();
         const remembered = localStorage.getItem(LAST_REALM_KEY);

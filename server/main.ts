@@ -153,6 +153,7 @@ import {
   handleNativeDiscordExchange,
 } from './discord';
 import { pruneDiscordOAuthStates, pruneDiscordPendingLogins } from './discord_db';
+import { configureSpectatorRuntime } from './spectator';
 import { configureTwitchRuntime } from './twitch';
 import { pruneTwitchOAuthStates, pruneTwitchPendingLogins } from './twitch_db';
 import { emailAccountCreated } from './email';
@@ -2287,6 +2288,19 @@ configureDiscordRuntime({
 // IP-block check applies on start/callback/login exactly like the Discord port.
 configureTwitchRuntime({
   isIpBlocked: (ip) => liveGame().isIpBlocked(ip),
+});
+
+// Fork (Livezul): the guided spectator camera roster — online players minus the
+// staff camera sessions (filtered by isAdmin so the observatory never spectates
+// itself or other moderators).
+configureSpectatorRuntime({
+  onlinePlayers: () => {
+    const game = liveGame();
+    return game
+      .liveSessions()
+      .filter((p) => !game.clients.get(p.pid)?.isAdmin)
+      .map((p) => ({ name: p.name, class: p.class, level: p.level, zone: p.zone ?? null }));
+  },
 });
 
 // Claudium routes mirror weapon-skin purchases into account cosmetics live (the
