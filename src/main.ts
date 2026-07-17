@@ -8337,7 +8337,25 @@ function wireStartScreens(): void {
           localStorage.setItem(LAST_REALM_KEY, realm.name);
         }
         const chars = await api.characters();
-        if (chars.length) await enterWorld(chars[0]);
+        if (!chars.length) return;
+        // Retry-until-in-world: reusing one camera character across OBS reloads
+        // races the previous session, which rejects with "character already in
+        // world" until the old socket drops and the join can resume (the server
+        // explicitly expects the client to retry). enterWorld signals failure
+        // via an async fatal overlay, not a throw, so we drive the retry off a
+        // readiness flag the spectator controller sets once snapshots flow.
+        const inWorld = () =>
+          Boolean((window as { __livezulSpectating?: boolean }).__livezulSpectating);
+        void enterWorld(chars[0]);
+        let tries = 0;
+        const retry = window.setInterval(() => {
+          if (inWorld() || tries >= 15) {
+            window.clearInterval(retry);
+            return;
+          }
+          tries++;
+          void enterWorld(chars[0]);
+        }, 6000);
       } catch (err) {
         console.error('[spectator] boot failed', err);
       }

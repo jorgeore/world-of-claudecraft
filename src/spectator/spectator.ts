@@ -88,6 +88,8 @@ export function startSpectatorMode(world: IWorld, opts: SpectatorOptions): void 
     if (ready) return;
     if (world.entities.size > 0 && world.player?.name) {
       ready = true;
+      // Tells the boot retry loop we made it into the world (stop re-entering).
+      (window as { __livezulSpectating?: boolean }).__livezulSpectating = true;
       window.clearInterval(waitReady);
       document.body.classList.add('spectator-cam'); // now hide the HUD
       setStatus('Conectando…', '');
