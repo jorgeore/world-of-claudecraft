@@ -1273,46 +1273,14 @@ async function startGame(
   // Fork (Livezul): guided spectator camera for an OBS browser source. With
   // ?spectator=1 (as the moderator camera account), auto-enter the world and
   // rotate the built-in /spectate camera across online players. Server unchanged.
+  // Fork (Livezul): guided spectator camera controller. The HANDS-OFF world
+  // entry runs at page boot (spectatorBootstrap), not here — startGame() only
+  // runs once we are already entering the world, so the controller install
+  // lives here while the auto-enter that leads here lives at the boot block.
   const spectatorParams = new URLSearchParams(location.search);
   if (spectatorParams.get('spectator') === '1') {
     const dwell = Number(spectatorParams.get('dwell')) || 15;
-    const spectatorKey = spectatorParams.get('key') ?? '';
-    startSpectatorMode(world, { key: spectatorKey, dwellMs: dwell * 1000 });
-    void (async () => {
-      // Fully hands-off entry for an OBS browser source (no login possible): the
-      // ?key= secret fetches a camera-account session from the server, then we
-      // auto-select the realm + character and enter the world. The controller
-      // then hides the HUD and starts rotating once snapshots flow.
-      try {
-        if (spectatorKey) {
-          // ALWAYS assume the camera account when a key is present — the OBS
-          // browser (or the owner's) may hold a leftover session for a normal
-          // account, which cannot /spectate and would turn the observatory into
-          // "standing around as my own character" (the bug jorge hit).
-          const cfg = await fetch(`/api/spectator/session?key=${encodeURIComponent(spectatorKey)}`)
-            .then((r) => (r.ok ? r.json() : null))
-            .catch(() => null);
-          if (cfg?.token) {
-            api.token = cfg.token;
-            api.username = cfg.username;
-            api.saveSession();
-          }
-        }
-        if (!api.token) return;
-        const dir = await api.realms();
-        const remembered = localStorage.getItem(LAST_REALM_KEY);
-        const realm = dir.realms.find((r) => r.name === remembered) ?? dir.realms[0];
-        if (realm) {
-          api.setRealm(realm.url);
-          api.realm = realm.name;
-          localStorage.setItem(LAST_REALM_KEY, realm.name);
-        }
-        const chars = await api.characters();
-        if (chars.length) await enterWorld(chars[0]);
-      } catch (err) {
-        console.error('[spectator] auto-enter failed', err);
-      }
-    })();
+    startSpectatorMode(world, { key: spectatorParams.get('key') ?? '', dwellMs: dwell * 1000 });
   }
 
   const mobileControls = new MobileControls(input, {
@@ -8339,6 +8307,41 @@ function wireStartScreens(): void {
     // form instead of the normal session restore (index.html only).
     enterLoggedOutChrome();
     show('#reset-panel');
+  } else if (new URLSearchParams(location.search).get('spectator') === '1') {
+    // Fork (Livezul): OBS spectator source. No login is possible in a browser
+    // source, so self-provision the camera account from ?key= and auto-enter the
+    // world at boot; the controller (installed in startGame once we enter) then
+    // hides the HUD and rotates /spectate across players. Always assumes the
+    // camera account, ignoring any leftover session for a normal account.
+    enterLoggedOutChrome();
+    void (async () => {
+      try {
+        const key = new URLSearchParams(location.search).get('key') ?? '';
+        if (key) {
+          const cfg = await fetch(`/api/spectator/session?key=${encodeURIComponent(key)}`)
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null);
+          if (cfg?.token) {
+            api.token = cfg.token;
+            api.username = cfg.username;
+            api.saveSession();
+          }
+        }
+        if (!api.token) return;
+        const dir = await api.realms();
+        const remembered = localStorage.getItem(LAST_REALM_KEY);
+        const realm = dir.realms.find((r) => r.name === remembered) ?? dir.realms[0];
+        if (realm) {
+          api.setRealm(realm.url);
+          api.realm = realm.name;
+          localStorage.setItem(LAST_REALM_KEY, realm.name);
+        }
+        const chars = await api.characters();
+        if (chars.length) await enterWorld(chars[0]);
+      } catch (err) {
+        console.error('[spectator] boot failed', err);
+      }
+    })();
   } else if (parkedDiscordChoice || parkedTwitchChoice) {
     enterLoggedOutChrome();
     showDiscordChoice((parkedDiscordChoice ?? parkedTwitchChoice) as ExternalAuthLoginChoice);
