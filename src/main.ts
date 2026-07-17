@@ -8348,14 +8348,17 @@ function wireStartScreens(): void {
           Boolean((window as { __livezulSpectating?: boolean }).__livezulSpectating);
         void enterWorld(chars[0]);
         let tries = 0;
+        // 13s > enterWorld's own 10s connect timeout, so each attempt fully
+        // resolves (success or fatal) before the next — otherwise overlapping
+        // attempts race one another for the single camera character.
         const retry = window.setInterval(() => {
-          if (inWorld() || tries >= 15) {
+          if (inWorld() || tries >= 20) {
             window.clearInterval(retry);
             return;
           }
           tries++;
           void enterWorld(chars[0]);
-        }, 6000);
+        }, 13000);
       } catch (err) {
         console.error('[spectator] boot failed', err);
       }
