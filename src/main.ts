@@ -1284,7 +1284,11 @@ async function startGame(
       // auto-select the realm + character and enter the world. The controller
       // then hides the HUD and starts rotating once snapshots flow.
       try {
-        if (spectatorKey && !api.token) {
+        if (spectatorKey) {
+          // ALWAYS assume the camera account when a key is present — the OBS
+          // browser (or the owner's) may hold a leftover session for a normal
+          // account, which cannot /spectate and would turn the observatory into
+          // "standing around as my own character" (the bug jorge hit).
           const cfg = await fetch(`/api/spectator/session?key=${encodeURIComponent(spectatorKey)}`)
             .then((r) => (r.ok ? r.json() : null))
             .catch(() => null);
