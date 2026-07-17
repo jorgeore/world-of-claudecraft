@@ -37,6 +37,7 @@ import { routes as leaderboardRoutes } from '../leaderboard';
 import { routes as mapsRoutes } from '../maps_routes';
 import { routes as oauthRoutes } from '../oauth';
 import { routes as reportsRoutes } from '../reports';
+import { routes as publicApiRoutes } from '../public_api';
 import { routes as spectatorRoutes } from '../spectator';
 import { routes as steamRoutes } from '../steam';
 import { routes as twitchRoutes } from '../twitch';
@@ -136,6 +137,7 @@ export const apiRoutes: readonly RouteDef[] = [
   ...steamRoutes,
   ...twitchRoutes,
   ...spectatorRoutes,
+  ...publicApiRoutes,
   // new:endpoint spreads appear above this line (npm run new:endpoint)
 ];
 

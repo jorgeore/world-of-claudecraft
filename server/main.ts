@@ -153,6 +153,7 @@ import {
   handleNativeDiscordExchange,
 } from './discord';
 import { pruneDiscordOAuthStates, pruneDiscordPendingLogins } from './discord_db';
+import { configurePublicApiRuntime } from './public_api';
 import { configureSpectatorRuntime } from './spectator';
 import { configureTwitchRuntime } from './twitch';
 import { pruneTwitchOAuthStates, pruneTwitchPendingLogins } from './twitch_db';
@@ -2301,6 +2302,11 @@ configureSpectatorRuntime({
       .filter((p) => !game.clients.get(p.pid)?.isAdmin)
       .map((p) => ({ name: p.name, class: p.class, level: p.level, zone: p.zone ?? null }));
   },
+});
+
+// Fork (Livezul): Twitch chat bridge — public !online count, staff excluded.
+configurePublicApiRuntime({
+  onlineCount: () => [...liveGame().clients.values()].filter((s) => !s.isAdmin).length,
 });
 
 // Claudium routes mirror weapon-skin purchases into account cosmetics live (the
